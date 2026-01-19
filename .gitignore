@@ -1,0 +1,19 @@
+# 특정 파일 제외
+상장법인목록.xls
+
+# txt 전체 제외
+*.txt
+!requirements.txt
+!배포.txt
+
+# Python / venv 필수 제외
+.venv/
+__pycache__/
+*.pyc
+
+# secrets
+.env
+*.env
+
+# 폴더 제외
+st/
