@@ -112,7 +112,6 @@ def calc_start_date(preset: str, end_date: datetime.date) -> datetime.date:
         return end_date - datetime.timedelta(days=365)
     if preset == "3Y":
         return end_date - datetime.timedelta(days=365 * 3)
-    # MAX는 date_input에서 받는 값 그대로 쓰도록(여기선 end_date만 반환)
     return datetime.date(end_date.year, 1, 1)
 
 
@@ -188,8 +187,7 @@ def build_plotly_chart(
         fig.add_hline(y=30, line_dash="dash", row=2, col=1)
         fig.update_yaxes(range=[0, 100], row=2, col=1, title_text="RSI")
 
-    # range selector (상단 버튼)
-    # NOTE: Plotly 상단 내장 버튼(주/월/6M/YTD/1Y/ALL)
+    # range selector + range slider
     fig.update_xaxes(
         rangeselector=dict(
             buttons=list(
@@ -224,50 +222,54 @@ def build_plotly_chart(
 
 
 # -----------------------------
-# 사이드바 (필터 패널)
+# 사이드바 (필터 패널) - Enter 제출 지원(form)
 # -----------------------------
 today_dt = datetime.datetime.now()
 today_date = today_dt.date()
 jan_1 = datetime.date(today_dt.year, 1, 1)
 
-st.sidebar.markdown("## 🔎 종목/기간")
-company_name = st.sidebar.text_input(
-    "회사명 또는 6자리 종목코드",
-    placeholder="예) 삼성전자 / 005930",
-)
-
-# 빠른 기간 선택
-preset = st.sidebar.radio(
-    "빠른 기간",
-    ["직접 선택", "1M", "3M", "6M", "YTD", "1Y", "3Y", "MAX"],
-    horizontal=False,
-)
-
-# 기간 입력 (preset에 따라 기본값 자동 셋)
 default_end = today_date
 default_start = jan_1
 
-if preset != "직접 선택" and preset != "MAX":
-    default_start = calc_start_date(preset, default_end)
+with st.sidebar.form("search_form", clear_on_submit=False):
+    st.markdown("## 🔎 종목/기간")
 
-selected_dates = st.sidebar.date_input(
-    "기간 선택",
-    (default_start, default_end),
-    format="YYYY-MM-DD",
-)
+    company_name = st.text_input(
+        "회사명 또는 6자리 종목코드",
+        placeholder="예) 삼성전자 / 005930",
+    )
 
-st.sidebar.markdown("## 📊 차트 옵션")
-show_volume = st.sidebar.checkbox("거래량", value=True)
-show_range_slider = st.sidebar.checkbox("차트 하단 슬라이더(줌)", value=False)
-ma_opts = st.sidebar.multiselect(
-    "이동평균선",
-    ["MA5", "MA20", "MA60", "MA120"],
-    default=["MA20", "MA60"],
-)
-show_rsi = st.sidebar.checkbox("RSI(14)", value=True)
+    preset = st.radio(
+        "빠른 기간",
+        ["직접 선택", "1M", "3M", "6M", "YTD", "1Y", "3Y", "MAX"],
+        horizontal=False,
+    )
 
-st.sidebar.markdown("---")
-confirm_btn = st.sidebar.button("📌 조회하기", use_container_width=True)
+    if preset != "직접 선택" and preset != "MAX":
+        default_start = calc_start_date(preset, default_end)
+
+    selected_dates = st.date_input(
+        "기간 선택",
+        (default_start, default_end),
+        format="YYYY-MM-DD",
+    )
+
+    st.markdown("## 📊 차트 옵션")
+    show_volume = st.checkbox("거래량", value=True)
+    show_range_slider = st.checkbox("차트 하단 슬라이더(줌)", value=False)
+    ma_opts = st.multiselect(
+        "이동평균선",
+        ["MA5", "MA20", "MA60", "MA120"],
+        default=["MA20", "MA60"],
+    )
+    show_rsi = st.checkbox("RSI(14)", value=True)
+
+    st.markdown("---")
+    confirm_btn = st.form_submit_button("📌 조회하기", use_container_width=True)
+
+
+# Plotly 스크롤 줌(마우스 휠 줌) 활성화 설정
+PLOTLY_CONFIG = {"scrollZoom": True, "displaylogo": False}
 
 
 # -----------------------------
@@ -343,13 +345,12 @@ if confirm_btn:
                 show_rsi=show_rsi,
                 show_range_slider=show_range_slider,
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
 
         with tab2:
             st.dataframe(price_df, use_container_width=True)
 
         with tab3:
-            # 금융앱 느낌: 누적수익률(기준=100) + 일간수익률
             ret = price_df["Close"].pct_change()
             cum = (1 + ret.fillna(0)).cumprod() * 100
 
@@ -366,7 +367,7 @@ if confirm_btn:
                 )
                 fig2.update_xaxes(showgrid=True, gridcolor="rgba(0,0,0,0.06)")
                 fig2.update_yaxes(showgrid=True, gridcolor="rgba(0,0,0,0.06)")
-                st.plotly_chart(fig2, use_container_width=True)
+                st.plotly_chart(fig2, use_container_width=True, config=PLOTLY_CONFIG)
 
             with r2:
                 st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -390,7 +391,7 @@ if confirm_btn:
             )
             fig3.update_xaxes(showgrid=True, gridcolor="rgba(0,0,0,0.06)")
             fig3.update_yaxes(showgrid=True, gridcolor="rgba(0,0,0,0.06)")
-            st.plotly_chart(fig3, use_container_width=True)
+            st.plotly_chart(fig3, use_container_width=True, config=PLOTLY_CONFIG)
 
         with tab4:
             output = BytesIO()
@@ -407,4 +408,4 @@ if confirm_btn:
     except Exception as e:
         st.error(f"오류가 발생했습니다: {e}")
 else:
-    st.info("사이드바에서 회사명/종목코드와 기간을 선택한 뒤 '조회하기'를 눌러주세요.")
+    st.info("사이드바에서 회사명/종목코드와 기간을 선택한 뒤 Enter 또는 '조회하기'를 눌러주세요.")
