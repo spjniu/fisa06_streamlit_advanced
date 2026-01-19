@@ -13,9 +13,57 @@ from plotly.subplots import make_subplots
 
 
 # -----------------------------
+# 스타일 (금융앱 느낌)
+# -----------------------------
+st.set_page_config(page_title="주가 조회 앱", layout="wide")
+
+st.markdown(
+    """
+<style>
+/* 전체 여백/폭 */
+.block-container {
+  padding-top: 1.2rem;
+  padding-bottom: 2.5rem;
+  max-width: 1200px;
+}
+/* 사이드바 폭 */
+section[data-testid="stSidebar"] { width: 340px; }
+
+/* 카드 느낌 */
+.card {
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(49, 51, 63, 0.12);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.04);
+  margin-bottom: 0.8rem;
+}
+.small-muted { color: rgba(49, 51, 63, 0.65); font-size: 0.9rem; }
+.badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  border: 1px solid rgba(49, 51, 63, 0.18);
+  background: rgba(49, 51, 63, 0.04);
+  vertical-align: middle;
+  margin-left: 6px;
+}
+/* dataframe 둥글게 */
+div[data-testid="stDataFrame"] { border-radius: 12px; overflow: hidden; }
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
+st.title("📈 주가 조회 (KRX)")
+st.caption("회사명(또는 종목코드)과 기간을 선택해 OHLC/거래량/지표를 확인하고 엑셀로 다운로드하세요.")
+
+
+# -----------------------------
 # 데이터 유틸
 # -----------------------------
-@st.cache_data(ttl=60 * 60 * 12)  # 12시간 캐시 (상장사 목록은 자주 안 바뀜)
+@st.cache_data(ttl=60 * 60 * 12)  # 12시간 캐시
 def get_krx_company_list() -> pd.DataFrame:
     """
     KRX 상장법인 목록(회사명, 종목코드) 로드
@@ -81,7 +129,9 @@ def build_plotly_chart(
     show_rsi: bool,
 ) -> go.Figure:
     """
-    Plotly 캔들 + MA + 거래량 + RSI
+    Plotly 캔들 + MA + 거래량 + RSI (금융앱 가시성 강화)
+    - 상승: 빨강, 하락: 파랑 (국내 증권앱 스타일)
+    - hovermode unified, 옅은 grid
     """
     rows = 2 if show_rsi else 1
     row_heights = [0.7, 0.3] if show_rsi else [1.0]
@@ -104,6 +154,8 @@ def build_plotly_chart(
             low=df["Low"],
             close=df["Close"],
             name="OHLC",
+            increasing_line_color="#D84A4A",  # 상승
+            decreasing_line_color="#2E6BE6",  # 하락
         ),
         row=1,
         col=1,
@@ -120,10 +172,17 @@ def build_plotly_chart(
                 secondary_y=False,
             )
 
-    # 거래량(보조축)
+    # 거래량(보조축) - 상승/하락 색 구분
     if show_volume and "Volume" in df.columns:
+        up = df["Close"] >= df["Open"]
+        vol_colors = np.where(up, "rgba(216,74,74,0.35)", "rgba(46,107,230,0.35)")
         fig.add_trace(
-            go.Bar(x=df.index, y=df["Volume"], name="Volume", opacity=0.35),
+            go.Bar(
+                x=df.index,
+                y=df["Volume"],
+                name="Volume",
+                marker_color=vol_colors,
+            ),
             row=1,
             col=1,
             secondary_y=True,
@@ -144,47 +203,52 @@ def build_plotly_chart(
         fig.update_yaxes(range=[0, 100], row=2, col=1, title_text="RSI")
 
     fig.update_layout(
-        height=700 if show_rsi else 520,
-        title=f"{company_name} 차트",
+        template="plotly_white",
+        hovermode="x unified",
         xaxis_rangeslider_visible=False,
+        height=720 if show_rsi else 540,
+        title=f"{company_name} 차트",
         legend_orientation="h",
-        legend_y=-0.15,
+        legend_y=-0.18,
         margin=dict(l=10, r=10, t=60, b=10),
     )
+    fig.update_xaxes(showgrid=True, gridcolor="rgba(0,0,0,0.06)")
+    fig.update_yaxes(showgrid=True, gridcolor="rgba(0,0,0,0.06)")
 
     return fig
 
 
 # -----------------------------
-# UI
+# 사이드바 (금융앱 필터 패널)
 # -----------------------------
-st.set_page_config(page_title="주가 조회 앱", layout="wide")
-st.title("📈 주가 조회 앱")
-
-company_name = st.sidebar.text_input("조회할 회사를 입력하세요 (회사명 또는 6자리 종목코드)")
-
 today_dt = datetime.datetime.now()
-jan_1 = datetime.date(today_dt.year, 1, 1)
 today_date = today_dt.date()
+jan_1 = datetime.date(today_dt.year, 1, 1)
 
-selected_dates = st.sidebar.date_input(
-    "조회할 날짜를 입력하세요",
-    (jan_1, today_date),
-    format="MM.DD.YYYY",
+st.sidebar.markdown("## 🔎 조회 설정")
+company_name = st.sidebar.text_input(
+    "회사명 또는 6자리 종목코드",
+    placeholder="예) 삼성전자 / 005930",
 )
 
-# 그래프 옵션
-st.sidebar.markdown("---")
-show_candle = st.sidebar.checkbox("캔들차트 보기(Plotly)", value=True)
-show_volume = st.sidebar.checkbox("거래량 표시", value=True)
+selected_dates = st.sidebar.date_input(
+    "기간",
+    (jan_1, today_date),
+    format="YYYY-MM-DD",
+)
+
+st.sidebar.markdown("## 📊 차트 옵션")
+show_volume = st.sidebar.checkbox("거래량", value=True)
 ma_opts = st.sidebar.multiselect(
-    "이동평균선(MA) 선택",
+    "이동평균선",
     ["MA5", "MA20", "MA60", "MA120"],
     default=["MA20", "MA60"],
 )
-show_rsi = st.sidebar.checkbox("RSI(14) 표시", value=True)
+show_rsi = st.sidebar.checkbox("RSI(14)", value=True)
 
-confirm_btn = st.sidebar.button("조회하기")
+st.sidebar.markdown("---")
+confirm_btn = st.sidebar.button("📌 조회하기", use_container_width=True)
+
 
 # -----------------------------
 # 메인 로직
@@ -192,57 +256,85 @@ confirm_btn = st.sidebar.button("조회하기")
 if confirm_btn:
     if not company_name.strip():
         st.warning("조회할 회사 이름(또는 종목코드)을 입력하세요.")
-    else:
-        try:
-            if not isinstance(selected_dates, (tuple, list)) or len(selected_dates) != 2:
-                st.warning("조회할 날짜를 시작/종료 2개로 선택해주세요.")
-                st.stop()
+        st.stop()
 
-            start_date = selected_dates[0].strftime("%Y%m%d")
-            end_date = selected_dates[1].strftime("%Y%m%d")
+    if not isinstance(selected_dates, (tuple, list)) or len(selected_dates) != 2:
+        st.warning("조회할 날짜를 시작/종료 2개로 선택해주세요.")
+        st.stop()
 
-            with st.spinner("데이터를 수집하는 중..."):
-                stock_code = get_stock_code_by_company(company_name)
-                price_df = fdr.DataReader(stock_code, start_date, end_date)
+    start_date = selected_dates[0].strftime("%Y%m%d")
+    end_date = selected_dates[1].strftime("%Y%m%d")
 
-            if price_df.empty:
-                st.info("해당 기간의 주가 데이터가 없습니다.")
-            else:
-                # 지표 추가
-                price_df = add_indicators(price_df)
+    try:
+        with st.spinner("데이터를 수집하는 중..."):
+            stock_code = get_stock_code_by_company(company_name)
+            price_df = fdr.DataReader(stock_code, start_date, end_date)
 
-                col1, col2 = st.columns([1, 1])
+        if price_df.empty:
+            st.info("해당 기간의 주가 데이터가 없습니다.")
+            st.stop()
 
-                with col1:
-                    st.subheader(f"[{company_name}] 최근 데이터")
-                    st.dataframe(price_df.tail(20), width="stretch")
+        # 지표 추가
+        price_df = add_indicators(price_df)
 
-                with col2:
-                    st.subheader("📊 차트")
-                    if show_candle:
-                        fig = build_plotly_chart(
-                            price_df,
-                            company_name=company_name,
-                            show_volume=show_volume,
-                            ma_opts=ma_opts,
-                            show_rsi=show_rsi,
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-                    else:
-                        st.info("Plotly 차트를 끄셨습니다. (원하면 Matplotlib 대체 차트를 추가할 수 있어요.)")
+        # KPI 카드
+        last = price_df.iloc[-1]
+        prev = price_df.iloc[-2] if len(price_df) >= 2 else last
 
-                # 엑셀 다운로드
-                st.markdown("---")
-                output = BytesIO()
-                with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                    price_df.to_excel(writer, index=True, sheet_name="Sheet1")
+        chg = float(last["Close"] - prev["Close"])
+        pct = (chg / float(prev["Close"]) * 100) if float(prev["Close"]) != 0 else 0.0
+        direction = "▲" if chg >= 0 else "▼"
 
-                st.download_button(
-                    label="📥 엑셀 파일 다운로드",
-                    data=output.getvalue(),
-                    file_name=f"{company_name}_주가.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                )
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        top_left, top_right = st.columns([3, 1], vertical_alignment="center")
 
-        except Exception as e:
-            st.error(f"오류가 발생했습니다: {e}")
+        with top_left:
+            st.markdown(f"### {company_name} <span class='badge'>KRX</span>", unsafe_allow_html=True)
+            st.markdown(
+                f"<span class='small-muted'>기간</span>  {selected_dates[0]} ~ {selected_dates[1]}",
+                unsafe_allow_html=True,
+            )
+
+        with top_right:
+            st.metric("종가", f"{last['Close']:,.0f}", f"{direction} {abs(chg):,.0f} ({pct:.2f}%)")
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("시가", f"{last['Open']:,.0f}")
+        c2.metric("고가", f"{last['High']:,.0f}")
+        c3.metric("저가", f"{last['Low']:,.0f}")
+        c4.metric("거래량", f"{int(last['Volume']):,}" if "Volume" in last else "-")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # 탭 구성
+        tab1, tab2, tab3 = st.tabs(["📊 차트", "🧾 데이터", "⬇️ 다운로드"])
+
+        with tab1:
+            fig = build_plotly_chart(
+                price_df,
+                company_name=company_name,
+                show_volume=show_volume,
+                ma_opts=ma_opts,
+                show_rsi=show_rsi,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+        with tab2:
+            st.dataframe(price_df, use_container_width=True)
+
+        with tab3:
+            output = BytesIO()
+            with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                price_df.to_excel(writer, index=True, sheet_name="Sheet1")
+
+            st.download_button(
+                label="📥 엑셀 파일 다운로드",
+                data=output.getvalue(),
+                file_name=f"{company_name}_주가.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
+
+    except Exception as e:
+        st.error(f"오류가 발생했습니다: {e}")
+else:
+    st.info("사이드바에서 회사명/종목코드와 기간을 선택한 뒤 '조회하기'를 눌러주세요.")
