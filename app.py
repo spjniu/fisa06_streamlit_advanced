@@ -45,7 +45,7 @@ div[data-testid="stDataFrame"] { border-radius: 12px; overflow: hidden; }
 )
 
 st.title("📈 주가 조회 (KRX)")
-st.caption("기간을 빠르게 바꾸고(1M/3M/6M/YTD/1Y/3Y/MAX), 차트에서 확대/축소까지 가능한 금융형 대시보드")
+st.caption("캔들 중심 차트 + 날짜 가시성 강화(hover/spike) + 마우스 휠 줌 + Enter 조회")
 
 
 # -----------------------------
@@ -97,9 +97,6 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def calc_start_date(preset: str, end_date: datetime.date) -> datetime.date:
-    """
-    빠른 기간 선택(preset)에 따라 시작일 계산
-    """
     if preset == "1M":
         return end_date - datetime.timedelta(days=31)
     if preset == "3M":
@@ -123,6 +120,12 @@ def build_plotly_chart(
     show_rsi: bool,
     show_range_slider: bool,
 ) -> go.Figure:
+    """
+    캔들 중심 + 날짜 가시성 강화:
+    - hovermode x unified
+    - x/y spikes(세로선/가로선)
+    - tick 포맷 YYYY-MM-DD
+    """
     rows = 2 if show_rsi else 1
     row_heights = [0.7, 0.3] if show_rsi else [1.0]
 
@@ -135,7 +138,7 @@ def build_plotly_chart(
         specs=[[{"secondary_y": True}]] + ([[{"secondary_y": False}]] if show_rsi else []),
     )
 
-    # 캔들 (상승: 빨강 / 하락: 파랑)
+    # 1) 캔들(메인)
     fig.add_trace(
         go.Candlestick(
             x=df.index,
@@ -152,22 +155,34 @@ def build_plotly_chart(
         secondary_y=False,
     )
 
-    # MA
+    # 2) MA(보조) - 너무 튀지 않게 얇게
+    ma_width = {"MA5": 1.2, "MA20": 1.6, "MA60": 1.6, "MA120": 1.6}
     for ma in ma_opts:
         if ma in df.columns:
             fig.add_trace(
-                go.Scatter(x=df.index, y=df[ma], mode="lines", name=ma),
+                go.Scatter(
+                    x=df.index,
+                    y=df[ma],
+                    mode="lines",
+                    name=ma,
+                    line=dict(width=ma_width.get(ma, 1.4)),
+                ),
                 row=1,
                 col=1,
                 secondary_y=False,
             )
 
-    # 거래량 (상승/하락 색 분리)
+    # 3) 거래량(보조축) - 상승/하락 색 분리
     if show_volume and "Volume" in df.columns:
         up = df["Close"] >= df["Open"]
         vol_colors = np.where(up, "rgba(216,74,74,0.35)", "rgba(46,107,230,0.35)")
         fig.add_trace(
-            go.Bar(x=df.index, y=df["Volume"], name="Volume", marker_color=vol_colors),
+            go.Bar(
+                x=df.index,
+                y=df["Volume"],
+                name="Volume",
+                marker_color=vol_colors,
+            ),
             row=1,
             col=1,
             secondary_y=True,
@@ -176,10 +191,10 @@ def build_plotly_chart(
 
     fig.update_yaxes(title_text="Price", row=1, col=1, secondary_y=False)
 
-    # RSI
+    # 4) RSI
     if show_rsi and "RSI14" in df.columns:
         fig.add_trace(
-            go.Scatter(x=df.index, y=df["RSI14"], mode="lines", name="RSI(14)"),
+            go.Scatter(x=df.index, y=df["RSI14"], mode="lines", name="RSI(14)", line=dict(width=1.6)),
             row=2,
             col=1,
         )
@@ -187,7 +202,7 @@ def build_plotly_chart(
         fig.add_hline(y=30, line_dash="dash", row=2, col=1)
         fig.update_yaxes(range=[0, 100], row=2, col=1, title_text="RSI")
 
-    # range selector + range slider
+    # 5) range selector + range slider
     fig.update_xaxes(
         rangeselector=dict(
             buttons=list(
@@ -206,6 +221,7 @@ def build_plotly_chart(
         type="date",
     )
 
+    # 6) 레이아웃/그리드/hover
     fig.update_layout(
         template="plotly_white",
         hovermode="x unified",
@@ -217,6 +233,24 @@ def build_plotly_chart(
     )
     fig.update_xaxes(showgrid=True, gridcolor="rgba(0,0,0,0.06)")
     fig.update_yaxes(showgrid=True, gridcolor="rgba(0,0,0,0.06)")
+
+    # 7) 날짜 가시성 강화(스파이크 + 날짜 포맷)
+    fig.update_xaxes(
+        tickformat="%Y-%m-%d",
+        ticklabelmode="period",
+        showspikes=True,
+        spikemode="across",
+        spikesnap="cursor",
+        spikecolor="rgba(0,0,0,0.25)",
+        spikethickness=1,
+    )
+    fig.update_yaxes(
+        showspikes=True,
+        spikemode="across",
+        spikesnap="cursor",
+        spikecolor="rgba(0,0,0,0.25)",
+        spikethickness=1,
+    )
 
     return fig
 
@@ -351,6 +385,7 @@ if confirm_btn:
             st.dataframe(price_df, use_container_width=True)
 
         with tab3:
+            # 누적수익률(기준=100) + 일간수익률
             ret = price_df["Close"].pct_change()
             cum = (1 + ret.fillna(0)).cumprod() * 100
 
